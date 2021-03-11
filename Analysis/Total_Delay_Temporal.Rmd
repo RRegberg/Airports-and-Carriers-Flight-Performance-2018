@@ -1,0 +1,104 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(broom)
+```
+
+
+##Scope
+
+This analysis explores the total delay by the local hour of the scheduled departure time. The weather delays are excluded, since these are completely random and occure at random times of the day.  
+
+
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+
+
+#Temporal Analysis
+
+How do departure delays look during the hours of the day? 
+
+```{r}
+flights_2018 %>%
+  mutate(Dep_Delay_Tot = Carrier_Delay + Nas_Delay + Security_Delay + Late_Ac_Delay) %>%
+  filter(Dep_Delay_Tot>0) %>%
+  group_by(Dep_Time_Planned_Local_Hour) %>%
+  summarize(Dep_Delay_Tot_Hour = mean(Dep_Delay_Tot)) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Dep_Delay_Tot_Hour)) +
+  geom_bar(stat = "identity")
+```
+
+
+We can see that the total delay times are higher during the very early morning hours. 
+
+How does this change when log transforming to address outliers?
+
+```{r}
+flights_2018 %>%
+  mutate(Dep_Delay_Tot = Carrier_Delay + Nas_Delay + Security_Delay + Late_Ac_Delay) %>%
+  filter(Dep_Delay_Tot>0) %>%
+  mutate(Dep_Delay_Tot_log = log(Dep_Delay_Tot)) %>%
+  group_by(Dep_Time_Planned_Local_Hour) %>%
+  summarize(Dep_Delay_Tot_Hour_Log = mean(Dep_Delay_Tot_log)) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Dep_Delay_Tot_Hour_Log)) +
+  geom_bar(stat = "identity")
+```
+
+
+How does this look for the different airlines?
+
+```{r}
+carrier1<-"JetBlue Airways"
+carrier2<-"Delta Air Lines Inc."
+
+flights_2018 %>%
+  mutate(Dep_Delay_Tot = Carrier_Delay + Nas_Delay + Security_Delay + Late_Ac_Delay) %>%
+  filter(Dep_Delay_Tot>0) %>%
+  filter(Carrier_Name == carrier1 | Carrier_Name == carrier2) %>%
+  group_by(Dep_Time_Planned_Local_Hour, Carrier_Name) %>%
+  summarize(Dep_Delay_Tot_Hour = mean(Dep_Delay_Tot)) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Dep_Delay_Tot_Hour, color = Carrier_Name)) +
+  geom_point() + geom_smooth()
+```
+
+
+#Comparing Two Different Departure Times of the Day
+
+```{r}
+dep_time1 <- 5
+dep_time2 <- 15
+
+flights_2018 %>%
+  mutate(Dep_Delay_Tot = Carrier_Delay + Nas_Delay + Security_Delay + Late_Ac_Delay) %>%
+  filter(Dep_Delay_Tot>0) %>%
+  filter(Dep_Time_Planned_Local_Hour == dep_time1 | Dep_Time_Planned_Local_Hour == dep_time2) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Dep_Delay_Tot)) +
+  geom_boxplot(aes(group = Dep_Time_Planned_Local_Hour)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+flights_2018 %>%
+  mutate(Dep_Delay_Tot = Carrier_Delay + Nas_Delay + Security_Delay + Late_Ac_Delay) %>%
+  filter(Dep_Delay_Tot>0) %>%
+  filter(Dep_Time_Planned_Local_Hour == dep_time1 | Dep_Time_Planned_Local_Hour == dep_time2) %>%
+  mutate(Dep_Delay_Tot_Log = log(Dep_Delay_Tot)) %>%
+  t.test(Dep_Delay_Tot_Log~Dep_Time_Planned_Local_Hour, data = .) %>%
+  tidy() -> tout_dep_delay_tot_hour
+
+exp(tout_dep_delay_tot_hour$estimate)
+exp(c(low = tout_dep_delay_tot_hour$conf.low, high = tout_dep_delay_tot_hour$conf.high))
+
+```
+The total, non weather related delays, seem to be similar between the 5AM departure hour and the 3PM departure hour. 
+

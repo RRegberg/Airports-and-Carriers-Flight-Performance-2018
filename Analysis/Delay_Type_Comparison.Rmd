@@ -1,0 +1,115 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+```
+
+
+##Scope
+
+This analysis explores the relationship between the delay types. 
+
+
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+
+
+
+So how do the delay type times compare with each other?
+
+
+```{r}
+flights_2018 %>%
+  gather("Carrier_Delay", 
+             "Weather_Delay", 
+             "Nas_Delay", 
+             "Security_Delay", 
+             "Late_Ac_Delay", 
+             key = "Delay_Type", 
+             value = "Delay_Type_Time") %>%
+  filter(Delay_Type_Time > 0) %>%
+  ggplot(aes(x = reorder(Delay_Type, Delay_Type_Time, FUN=median), y = Delay_Type_Time)) +
+  geom_boxplot(aes(group = Delay_Type)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+What do the mean delay times look like?
+
+```{r}
+flights_2018 %>%
+  gather("Carrier_Delay", 
+             "Weather_Delay", 
+             "Nas_Delay", 
+             "Security_Delay", 
+             "Late_Ac_Delay", 
+             key = "Delay_Type", 
+             value = "Delay_Type_Time") -> flights_2018_Delay_Types
+
+flights_2018_Delay_Types$Delay_Type <- as_factor(flights_2018_Delay_Types$Delay_Type)
+
+flights_2018_Delay_Types %>%
+  filter(Delay_Type_Time>0) %>%
+  group_by(Delay_Type) %>%
+  summarise(Delay_Type_Mean = mean(Delay_Type_Time)) %>%
+  mutate(Delay_Type = fct_reorder(Delay_Type,Delay_Type_Mean)) %>%
+  ggplot(aes(x = Delay_Type, y = Delay_Type_Mean)) +
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+It seems like on average, weather delays are the longest, with security delays the shortest. 
+
+What does this look like when addressing outliers? A log transformation can be used.
+
+```{r}
+flights_2018_Delay_Types %>%
+  filter(Delay_Type_Time>0) %>%
+  mutate(Delay_Type_Time_Log = log(Delay_Type_Time)) %>%
+  group_by(Delay_Type) %>%
+  summarise(Delay_Type_Mean_Log = mean(Delay_Type_Time_Log)) %>%
+  mutate(Delay_Type = fct_reorder(Delay_Type,Delay_Type_Mean_Log)) %>%
+  ggplot(aes(x = Delay_Type, y = Delay_Type_Mean_Log)) +
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+When adjusting for outliers, late aircraft delays are the longest on average with NAS delays the shortest.
+
+#Comparing Delay Types
+
+```{r}
+delay_type1 <- "Nas_Delay"
+delay_type2 <- "Late_Ac_Delay"
+
+flights_2018_Delay_Types %>%
+  filter(Delay_Type_Time>0) %>%
+  filter(Delay_Type == delay_type1 | Delay_Type == delay_type2) %>%
+  ggplot(aes(x = Delay_Type, y = Delay_Type_Time)) +
+  geom_boxplot(aes(group = Delay_Type)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+flights_2018_Delay_Types %>%
+  filter(Delay_Type_Time>0) %>%
+  filter(Delay_Type == delay_type1 | Delay_Type == delay_type2) %>%
+  mutate(Delay_Type_Time_Log = log(Delay_Type_Time)) %>%
+  t.test(Delay_Type_Time_Log~Delay_Type, data = .) %>%
+  tidy() -> tout_delay_type
+
+exp(tout_delay_type$estimate)
+exp(c(low = tout_delay_type$conf.low, high = tout_delay_type$conf.high))
+
+```
+
+It appears that Nas Delays are about 0.54 times shorter than late aircraft delays. 
+

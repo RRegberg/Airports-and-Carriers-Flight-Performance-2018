@@ -1,0 +1,265 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Import
+
+This file reads the flight data, performs tidy operations, and creates a list of data frames with the flights for each month of 2018. The flight data is obtained for all states, in the year 2018, from the Bureau of Transportation Statistics <https://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=236>. The variables that are imported have been selected based on the project requirements. There is a subset of required variables that is a linear combination of other variables in the dataset. This subset is available and can be selected directly from the BTS web page. But in order to reduce the generated file sizes, a minimum set of variables is selected in the file generation with a subset being computed via operations in R. 
+
+#Minimum Variable Set
+
+The minimum variable set is generated from the BTS web page and contains the following variables. These variable names are mapped to the BTS web page:
+
+Time Period:
+
+Flight Date - Flight Date (yyyymmdd)
+
+Airline:
+
+Reporting_Airline - Unique Carrier Code. When the same code has been used by multiple carriers, a numeric suffix is used for earlier users, for example, PA, PA(1), PA(2). Use this field for analysis across a range of years.
+
+Origin:
+
+Origin - Origin Airport Code
+OriginCityName - Origin Airport, City Name, State
+
+Destination:
+
+Dest - Destination Airport Code
+DestCityName - Destination Airport, City Name, State
+
+Departure Performance:
+
+CRSDepTime - Computerized Reservations Systems Departure Time (local time: hhmm)
+DepTime - Actual Departure Time (local time: hhmm)
+WheelsOff - Wheels Off Time (local time: hhmm)
+
+Arrival Performance:
+
+WheelsOn - Wheels On Time (local time: hhmm)
+CRSArrTime - Computerized Reservations Systems Arrival Time (local time: hhmm)
+ArrTime - Actual Arrival Time (local time: hhmm)
+
+Cancellations And Diversions:
+
+Cancelled - Cancelled Flight Indicator (1=Yes)
+CancellationCode - Specifies The Reason For Cancellation
+Diverted - Diverted Flight Indicator (1=Yes)
+
+Flight Summaries:
+
+AirTime - Flight Time, in Minutes
+Distance - Distance between airports (miles)
+
+#Computed Variable Subset
+
+The following variables are available from BTS and computed from the minimum variable set. This computation will be handled in the data tidy operations in order to reduce the file size from the BTS. THe variable names are mapped from the BTS web page:
+
+Origin:
+
+OriginStateName = (This is generated from the origin city name, since the origin city name contains the state) - Origin Airport, State Name
+
+Destination:
+
+DestStateName = (This is generated from the destination city name, since the destination city name contains the state) - Destination Airport, State Name
+
+Departure Performance:
+
+DepDelay = (DepTime - CRSDepTime) - Difference in minutes between scheduled and actual departure time. Early departures show negative numbers.
+TaxiOut = (WheelsOff - DepTime) - Taxi Out Time, in Minutes
+
+Arrival Performance:
+
+ArrDelay = (ArrTime - CRSArrTime) - Difference in minutes between scheduled and actual arrival time. Early arrivals show negative numbers.
+TaxiIn = (ArrTime - WheelsOn) - Taxi In Time, in Minutes 
+
+
+
+#R Code for Data Reading and Tidy
+
+Use this section to read the data files. Ensure that the data files follow the format specified in the comments of the code.
+
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(lubridate)
+library(purrr)
+
+hm_convert <- function(time_string){
+  input_length <- str_length(time_string)
+  if(input_length <= 2){
+    time_string <- paste0("00", time_string)
+  }
+  time_out <- hm(str_replace(time_string, "(\\d+)(\\d\\d)", "\\1 \\2"), quiet = TRUE)
+  return(time_out)
+}
+
+read_flights <- function(file_name){
+  dt <- fread(file_name, 
+                 colClasses = c("CANCELLED" = "factor", 
+                                "CANCELLATION_CODE" = "factor", 
+                                "DIVERTED" = "factor",
+                                "CRS_DEP_TIME" = "character",
+                                "DEP_TIME" = "character",
+                                "CRS_ARR_TIME" = "character",
+                                "ARR_TIME" = "character",
+                                "WHEELS_OFF" = "character",
+                                "WHEELS_ON" = "character"),
+                 col.names = c("Date", 
+                               "Carrier_Code", 
+                               "Origin", 
+                               "Origin_City", 
+                               "Dest", 
+                               "Dest_City",
+                               "Dep_Time_Planned", 
+                               "Dep_Time_Actual", 
+                               "Wheels_Off", 
+                               "Wheels_On",
+                               "Arr_Time_Planned", 
+                               "Arr_Time_Actual", 
+                               "Cancelled", 
+                               "Cancellation_Code",
+                               "Diverted", 
+                               "Air_Time", 
+                               "Distance", 
+                               "Empty"))
+  return(dt)
+}
+
+dt_tidy <- function(flights){
+  flights[, "Date" := ymd(Date)]
+  flights[, "Dep_Time_Planned" := hm_convert(Dep_Time_Planned)]
+  flights[, "Dep_Time_Actual" := hm_convert(Dep_Time_Actual)]
+  flights[, "Arr_Time_Planned" := hm_convert(Arr_Time_Planned)]
+  flights[, "Arr_Time_Actual" := hm_convert(Arr_Time_Actual)]
+  flights[, "Wheels_Off" := hm_convert(Wheels_Off)]
+  flights[, "Wheels_On" := hm_convert(Wheels_On)]
+  flights[, "Air_Time" := dminutes(Air_Time)]
+  flights[, "Dep_Delay" := Dep_Time_Actual - Dep_Time_Planned]
+  flights[, "Arr_Delay" := Arr_Time_Actual - Arr_Time_Planned]
+  flights[, "Cancelled" := fct_recode(Cancelled, "Yes" = "1.00", "No" = "0.00")]
+  flights[, "Diverted" := fct_recode(Diverted, "Yes" = "1.00", "No" = "0.00")]
+  flights[, "Cancellation_Code" := fct_recode(Cancellation_Code, 
+                                          "Carrier" = "A", 
+                                          "Weather" = "B",
+                                          "National Air System" = "C",
+                                          "Security" = "D")]
+  flights[, c("Origin_City", "Origin_State") := tstrsplit(Origin_City, split = ", ")]
+  flights[, c("Dest_City", "Dest_State") := tstrsplit(Dest_City, split = ", ")]
+  return(flights)
+}
+
+#Read in the unique carrier code lookup from BTS 
+lookup_carrier <- fread("../data/lookup_carrier.csv",
+                           col.names = c("Carrier_Code", "Carrier_Name"))
+
+#Read in the airport operations
+airport_ops <- fread("../data/airport_ops.csv", skip = 2)
+
+#Create a list of the files in the "data" driectory, containing the file names
+data_files <- list.files(path = "../data")
+
+#Create a list of the flight data files
+flight_data_index <-str_detect(data_files, "flight_data")
+flight_data_files <- data_files[flight_data_index]
+
+#Create the data list that will used for analysis. The list elements will containg data frames for each calendar month
+data_list <- vector(mode = "list")
+
+#Create a data frame for flights in 2018, to be populated with random samples from each month of 2018
+flights_2018 <- c()
+
+#Populate the data list with data frames generated from the files in the "data" directory. Each file is read in using the "data_reader" function and tidy operations are performed by the "data_tidy" function. Each generated data frame is then inserted into the "data_list" with the element name generated from the "month_year" portion of the file name. The file name format must contain "..._month_year.csv", with "month" being a 3 letter abbreviation for each month. 
+for (i in seq_along(flight_data_files)){
+  data_list_index <- str_extract(flight_data_files[i], '....(\\d+)')
+  filename <- str_c("../data/", flight_data_files[i])
+  flight_file_input <- dt_tidy(read_flights(filename))
+  merge_carrier <- merge(flight_file_input, lookup_carrier, by = "Carrier_Code", all.x = TRUE)
+  flights_2018 <- rbind(flights_2018, merge_carrier)
+}
+```
+
+
+
+
+# Test Section
+
+
+```{r}
+
+
+
+
+flights <- fread("../data/flight_data_apr_2018.csv", 
+                 colClasses = c("CANCELLED" = "factor", 
+                                "CANCELLATION_CODE" = "factor", 
+                                "DIVERTED" = "factor",
+                                "CRS_DEP_TIME" = "character",
+                                "DEP_TIME" = "character",
+                                "CRS_ARR_TIME" = "character",
+                                "ARR_TIME" = "character",
+                                "WHEELS_OFF" = "character",
+                                "WHEELS_ON" = "character"),
+                 col.names = c("Date", 
+                               "Carrier_Code", 
+                               "Origin", 
+                               "Origin_City", 
+                               "Dest", 
+                               "Dest_City",
+                               "Dep_Time_Planned", 
+                               "Dep_Time_Actual", 
+                               "Wheels_Off", 
+                               "Wheels_On",
+                               "Arr_Time_Planned", 
+                               "Arr_Time_Actual", 
+                               "Cancelled", 
+                               "Cancellation_Code",
+                               "Diverted", 
+                               "Air_Time", 
+                               "Distance", 
+                               "Empty"))
+
+
+
+flights[, "Date" := ymd(Date)]
+flights[, "Dep_Time_Planned" := hm_convert(Dep_Time_Planned)]
+flights[, "Dep_Time_Actual" := hm_convert(Dep_Time_Actual)]
+flights[, "Arr_Time_Planned" := hm_convert(Arr_Time_Planned)]
+flights[, "Arr_Time_Actual" := hm_convert(Arr_Time_Actual)]
+flights[, "Wheels_Off" := hm_convert(Wheels_Off)]
+flights[, "Wheels_On" := hm_convert(Wheels_On)]
+flights[, "Air_Time" := dminutes(Air_Time)]
+flights[, "Dep_Delay" := Dep_Time_Actual - Dep_Time_Planned]
+flights[, "Arr_Delay" := Arr_Time_Actual - Arr_Time_Planned]
+flights[, "Cancelled" := fct_recode(Cancelled, "Yes" = "1.00", "No" = "0.00")]
+flights[, "Diverted" := fct_recode(Diverted, "Yes" = "1.00", "No" = "0.00")]
+flights[, "Cancellation_Code" := fct_recode(Cancellation_Code, 
+                                          "Carrier" = "A", 
+                                          "Weather" = "B",
+                                          "National Air System" = "C",
+                                          "Security" = "D")]
+flights[, c("Origin_City", "Origin_State") := tstrsplit(Origin_City, split = ", ")]
+flights[, c("Dest_City", "Dest_State") := tstrsplit(Dest_City, split = ", ")]
+
+        
+
+```
+
+
+
+
+
+Airport Opertions data onbtained from:
+https://www.faa.gov/news/media_resources/ATADSguide/
+
+
+
+

@@ -1,0 +1,191 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+```
+
+
+##Scope
+
+This analysis explores the relationship between the delay type and total delay time. 
+
+
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+
+
+#Departure Delay
+
+How does the overall distribution for departure delays look like?
+
+```{r}
+flights_2018 %>%
+  ggplot(aes(x=Dep_Delay)) +
+  geom_bar(bins = 200)
+```
+
+From the initial plot, we can see that there are some outliers that are expanding the x-axis. So what are the outlier flight delays? Let's look at delays that are more than 10 hours.
+
+```{r}
+#Pull out flights that are more than 10 hours late
+#Plot the delay time counts for flights more than 10 hours late
+flights_2018 %>%
+  filter(Dep_Delay > 600) %>%
+  ggplot(aes(x=Dep_Delay)) +
+  geom_freqpoly()
+```
+
+It seems like there are quite a few flights with delays between 10 and 20 hours, with the longest delay being around 30 hours. So what is the primary cause for these outlier delays?
+
+
+```{r}
+#Gather all the delay types for outlier delays 
+#Plot the count of delay types for outlier delays
+flights_2018 %>%
+      gather("Carrier_Delay", 
+             "Weather_Delay", 
+             "Nas_Delay", 
+             "Security_Delay", 
+             "Late_Ac_Delay", 
+             key = "Delay_Type", 
+             value = "Delay_Type_Time") %>%
+      filter(Delay_Type_Time > 600 & Delay_Type_Time != 0) %>%
+  ggplot(aes(x=Delay_Type_Time, group = Delay_Type, color = Delay_Type)) +
+        geom_freqpoly()
+
+```
+
+It seems like carrier delays make up the bulk of these outlier delays. Let's explore this numerically.
+
+```{r}
+#Compute and plot the delay type proportions for outlier delays
+flights_2018 %>%
+  gather("Carrier_Delay", 
+             "Weather_Delay", 
+             "Nas_Delay", 
+             "Security_Delay", 
+             "Late_Ac_Delay", 
+             key = "Delay_Type", 
+             value = "Delay_Type_Time") %>%
+  filter(Delay_Type_Time > 600 & Delay_Type_Time != 0) %>%
+  group_by(Delay_Type) %>%
+  mutate(Del_Type_Sum = sum(Delay_Type_Time)) %>%
+  ungroup() %>%
+  mutate(Del_Type_Total = sum(Delay_Type_Time)) %>%
+  mutate(Del_Type_Prop = Del_Type_Sum/Del_Type_Total) %>%
+  select(c("Delay_Type", "Del_Type_Prop")) %>%
+  unique %>%
+  ggplot(aes(x=Delay_Type, y=Del_Type_Prop)) +
+  geom_bar(stat = "identity")
+```
+
+It appears that carrier delays make up the bulk of the outlier delays. How does this compare with delays that are less than the outlier threshold?
+
+```{r}
+#Pull out flights that are less than 10 hours late
+#Plot the delay time counts for flights less than 10 hours late
+flights_2018 %>%
+  filter(Dep_Delay < 600) %>%
+  ggplot(aes(x=Dep_Delay)) +
+  geom_freqpoly()
+```
+
+```{r}
+#Gather all the delay types for normal delay types
+#Plot the count of delay types for normal delays
+flights_2018 %>%
+      gather("Carrier_Delay", 
+             "Weather_Delay", 
+             "Nas_Delay", 
+             "Security_Delay", 
+             "Late_Ac_Delay", 
+             key = "Delay_Type", 
+             value = "Delay_Type_Time") %>%
+      filter(Delay_Type_Time < 600 & Delay_Type_Time != 0) %>%
+  ggplot(aes(x=Delay_Type_Time, group = Delay_Type, color = Delay_Type)) +
+        geom_freqpoly()
+```
+
+It seems like an even distribution between Carrier Delay, Nas Delay, and Late Aircraft Delay. Let's explore this numerically.
+
+```{r}
+#Compute and plot the delay type proportions for normal delays
+flights_2018 %>%
+  gather("Carrier_Delay", 
+             "Weather_Delay", 
+             "Nas_Delay", 
+             "Security_Delay", 
+             "Late_Ac_Delay", 
+             key = "Delay_Type", 
+             value = "Delay_Type_Time") %>%
+  filter(Delay_Type_Time < 600 & Delay_Type_Time != 0) %>%
+  group_by(Delay_Type) %>%
+  mutate(Del_Type_Sum = sum(Delay_Type_Time)) %>%
+  ungroup() %>%
+  mutate(Del_Type_Total = sum(Delay_Type_Time)) %>%
+  mutate(Del_Type_Prop = Del_Type_Sum/Del_Type_Total) %>%
+  select(c("Delay_Type", "Del_Type_Prop")) %>%
+  unique() %>%
+  ggplot(aes(x=Delay_Type, y=Del_Type_Prop)) +
+  geom_bar(stat = "identity")
+```
+
+For flights that are delayed by less than 10 hours, late aircraft delays make up the bigger proportion. It will be beneficial to explore how the delay type proportions change with the delay time window. How is the makeup of the delay type proportions with respect to delay time?
+
+
+```{r}
+#Create bins for delay times
+delay_bins <- seq(min(flights_2018$Dep_Delay),max(flights_2018$Dep_Delay),30)
+
+#Calculate the delay type proportions for each delay time bin and then plot
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  mutate(Delay_Bins = cut(Dep_Delay, delay_bins)) %>%
+  group_by(Delay_Bins) %>%
+  mutate(Carrier_Delay_Prop = sum(Carrier_Delay)/sum(Carrier_Delay, 
+                                                     Weather_Delay, 
+                                                     Nas_Delay, 
+                                                     Security_Delay, 
+                                                     Late_Ac_Delay),
+         Weather_Delay_Prop = sum(Weather_Delay)/sum(Carrier_Delay, 
+                                                     Weather_Delay, 
+                                                     Nas_Delay, 
+                                                     Security_Delay, 
+                                                     Late_Ac_Delay),
+         Nas_Delay_Prop = sum(Nas_Delay)/sum(Carrier_Delay, 
+                                             Weather_Delay, 
+                                             Nas_Delay, 
+                                             Security_Delay, 
+                                             Late_Ac_Delay),
+         Security_Delay_Prop = sum(Security_Delay)/sum(Carrier_Delay, 
+                                                       Weather_Delay, 
+                                                       Nas_Delay, 
+                                                       Security_Delay, 
+                                                       Late_Ac_Delay),
+         Late_Ac_Delay_Prop = sum(Late_Ac_Delay)/sum(Carrier_Delay, 
+                                                     Weather_Delay, 
+                                                     Nas_Delay, 
+                                                     Security_Delay, 
+                                                     Late_Ac_Delay)) %>%
+  gather("Carrier_Delay_Prop",
+         "Weather_Delay_Prop",
+         "Nas_Delay_Prop",
+         "Security_Delay_Prop",
+         "Late_Ac_Delay_Prop",
+         key = "Delay_Prop_Type",
+         value = "Delay_Prop") %>%
+  ggplot(aes(x=Dep_Delay, y=Delay_Prop, group = Delay_Prop_Type, color = Delay_Prop_Type)) + geom_point() + geom_smooth()
+  
+```
+

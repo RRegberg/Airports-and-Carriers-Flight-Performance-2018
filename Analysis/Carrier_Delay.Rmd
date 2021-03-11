@@ -1,0 +1,112 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(broom)
+```
+
+
+##Scope
+
+This analysis further explores the carrier delay type by airline performance for this category.  
+
+
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+
+
+# Carrier Delays
+
+What does the distribution of carrier delays look like?
+
+```{r}
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  ggplot(aes(x = Carrier_Delay)) +
+  geom_bar()
+```
+
+We can see that there are more carrier delays that are longer than 500 minutes. 
+
+How is this distributed among the airlines?
+
+```{r}
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  ggplot(aes(x = reorder(Carrier_Name, Carrier_Delay, FUN=median), y = Carrier_Delay)) +
+  geom_boxplot(aes(group = Carrier_Name)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+It doesn't seem like there are any clear patterns between the airlines. What do the means look like?
+
+```{r}
+flights_2018$Carrier_Name <- as_factor(flights_2018$Carrier_Name)
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  group_by(Carrier_Name) %>%
+  summarise(Carrier_Delay_Mean = mean(Carrier_Delay)) %>%
+  mutate(Carrier_Name = fct_reorder(Carrier_Name,Carrier_Delay_Mean)) %>%
+  ggplot(aes(x = Carrier_Name, y = Carrier_Delay_Mean)) +
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+What about when adjusting for outliers? A log transformation can be used.
+
+```{r}
+flights_2018$Carrier_Name <- as_factor(flights_2018$Carrier_Name)
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  mutate(Carrier_Delay_Log = log(Carrier_Delay)) %>%
+  group_by(Carrier_Name) %>%
+  summarise(Carrier_Delay_Mean_Log = mean(Carrier_Delay_Log)) %>%
+  mutate(Carrier_Name = fct_reorder(Carrier_Name,Carrier_Delay_Mean_Log)) %>%
+  ggplot(aes(x = Carrier_Name, y = Carrier_Delay_Mean_Log)) +
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+#Comparing Two Airlines
+
+```{r}
+carrier2 <- "Southwest Airlines Co."
+carrier1 <- "SkyWest Airlines Inc."
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  filter(Carrier_Name == carrier1 | Carrier_Name == carrier2) %>%
+  ggplot(aes(x = Carrier_Name, y = Carrier_Delay)) +
+  geom_boxplot(aes(group = Carrier_Name)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  filter(Carrier_Name == carrier1 | Carrier_Name == carrier2) %>%
+  mutate(Carrier_Delay_Log = log(Carrier_Delay)) %>%
+  t.test(Carrier_Delay_Log~Carrier_Name, data = .) %>%
+  tidy() -> tout_carrier_delay_carrier
+
+exp(tout_carrier_delay_carrier$estimate)
+exp(c(low = tout_carrier_delay_carrier$conf.low, high = tout_carrier_delay_carrier$conf.high))
+
+```
+Carrier delays on SkyWest are about 2.75 times longer than carrier delays on Southwest. 
+
+
+
+
+

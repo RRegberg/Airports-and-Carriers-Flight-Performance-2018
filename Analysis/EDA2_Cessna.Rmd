@@ -1,0 +1,187 @@
+---
+title: "EDA2"
+author: "Janice Cessna"
+date: "November 30, 2019"
+output: html_document
+---
+
+```{r setup and load, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lubridate)
+library(GGally)
+library(gridExtra)
+
+flights_2018 <- readRDS("../data/flights_2018.Rds")
+```
+  
+  
+  
+Scatterplot matrices  
+```{r message=FALSE, warning=FALSE}
+flights_2018 %>%
+  filter(Dep_Delay != 0) %>%
+  select(Dep_Time_Planned_UTC, Dep_Time_Actual_UTC, Dep_Delay, Taxi_Out, 
+         Arr_Time_Planned_UTC, Arr_Time_Actual_UTC, Arr_Delay, Taxi_In, 
+         Air_Time, Distance) %>%
+  ggpairs()
+```  
+
+
+#Plotting pandemonium
+```{r Dep_Delay boxplot by hour}
+flights_2018 %>%
+  filter(!is.na(Dep_Time_Planned_Local_Hour)) %>%
+  ggplot(aes(x = as.factor(Dep_Time_Planned_Local_Hour), 
+             y = log2(Dep_Delay))) +
+  geom_boxplot()
+```
+
+```{r Arr_Delay ~ Dep_Delay with faceted Hour color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  filter(!is.na(Dep_Time_Planned_Local_Hour) & !is.na(Arr_Time_Planned_Actual_Hour)) %>%
+  ggplot(aes(x = Dep_Delay, y = Arr_Delay, alpha = 0.1, color = as.factor(Dep_Time_Planned_Actual_Hour))) +
+  geom_point() +
+  facet_wrap(~ as.factor(Dep_Time_Planned_Actual_Hour)) +
+  labs(title = "Hour of day") +
+  theme(legend.position = "none")
+```
+
+```{r Dep_delay vs Arr_delay with Diverted color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Dep_Delay, y = Arr_Delay, alpha = 0.01, color = Diverted)) +
+  geom_point()
+```
+```{r Arr_Delay ~ Dep_Delay with faceted Carrier_Name color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Dep_Delay, y = Arr_Delay, alpha = 0.1, color = Carrier_Name)) +
+  geom_point() +
+  facet_wrap(~ Carrier_Name) +
+  theme(legend.position = "none")
+```
+
+```{r -Arr_delay ~ +Dep_delay faceted by hour color}
+flights_2018 %>%
+  filter(Dep_Delay > 0 & Arr_Delay <0) %>% 
+  ggplot(aes(x = Dep_Delay, y = Arr_Delay, 
+             color = as.factor(Dep_Time_Planned_Local_Hour))) +
+  facet_wrap(~ as.factor(Dep_Time_Planned_Local_Hour)) +  
+  geom_point() +
+  labs(title = "Hour of day") +
+  theme(legend.position = "none")
+```
+```{r -Arr_delay ~ +Dep_delay faceted by Carrier color}
+flights_2018 %>%
+  filter(Dep_Delay > 0 & Arr_Delay <0) %>% 
+  ggplot(aes(x = Dep_Delay, y = Arr_Delay, 
+             color = as.factor(Dep_Time_Planned_Local_Hour))) +
+  facet_wrap(~ Carrier_Code) +  
+  geom_point() +
+  labs(color = "Hour of day")
+```
+
+
+
+```{r Dep_Delay ~ Distance with Carrier_Name color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Distance, y = Dep_Delay, color = Carrier_Name)) +
+  geom_point()
+```
+```{r Dep_Delay ~ Distance with faceted Carrier_Name color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Distance, y = Dep_Delay, alpha = 0.1, color = Carrier_Name)) +
+  geom_point() +
+  facet_wrap(~ Carrier_Name) +
+  theme(legend.position = "none")
+```
+
+
+```{r Taxi_Out ~ Dep_Delay with Carrier_Name color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Dep_Delay, y = Taxi_Out, color = Carrier_Name)) +
+  geom_point() +
+  labs(color = "Hour of day") 
+```
+```{r Taxi_Out ~ Dep_Delay with faceted Carrier_Name color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Dep_Delay, y = Taxi_Out, color = as.factor(Dep_Time_Planned_Local_Hour))) +
+  geom_point() +
+  facet_wrap(~ as.factor(Dep_Time_Planned_Local_Hour)) +
+  labs(title = "Hour of day") +
+  theme(legend.position = "none")
+```
+
+```{r Taxi_Out ~ Dep_Delay with faceted Hour color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Dep_Delay, y = Taxi_Out, color = as.factor(Dep_Time_Planned_Local_Hour))) +
+  geom_point() +
+  facet_wrap(~ as.factor(Dep_Time_Planned_Local_Hour)) +
+  labs(title = "Hour of day") +
+  theme(legend.position = "none")
+```
+
+
+
+```{r Taxi_in ~ Arr_Delay with faceted hour color}
+flights_2018 %>%
+  ggplot(aes(x = Arr_Delay, y = Taxi_In, color = as.factor(Arr_Time_Planned_Local_Hour))) +
+  geom_point() +
+  facet_wrap(~ as.factor(Arr_Time_Planned_Local_Hour)) +
+  theme(legend.position = "none")
+```
+
+
+
+```{r Air_time ~ Distance with Hour color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Air_Time, y = Distance, color = as.factor(Dep_Time_Planned_Local_Hour))) +
+  geom_point() +
+  labs(color = "Hour of day")
+```
+```{r Distance ~ Air_time with Hour color, message=FALSE, warning=FALSE}
+flights_2018 %>%
+  ggplot(aes(x = Distance, y = Air_Time, group = cut_width(Distance, 60))) +
+  geom_boxplot() 
+```
+  
+  
+  
+```{r Dep_Delay ~ Date with Carrier facet}
+flights_2018 %>%
+  ggplot(aes(x = Date, y = Dep_Delay, group = Carrier_Code, color = Carrier_Code)) +
+  geom_line() +
+  facet_wrap(~ Carrier_Code) +
+  labs(title = "Carrier Code") +
+  theme(legend.position = "none") 
+```
+  
+```{r Dest ~ Origin with Dep_delay count}
+flights_2018 %>%
+  ggplot(aes(x = Origin, y = Dest, size = Dep_Delay, color = Dep_Delay)) +
+  geom_count() +
+  scale_size_area()
+```
+  
+  
+  
+```{r Mean_Dep_Delay ~ Tot_Ops}
+#from Data_Import.Rmd -- reading in airport operations
+airport_ops <- read_csv("../data/airport_ops.csv", 
+                        col_names = c("Id", "Code", "AC", "Taxi", 
+                                      "GA", "Mil", "Tot", "Civ", "Mil1", "Tot1", "Tot_Ops"),
+                        skip = 3)
+airport_ops <- select(airport_ops, c("Code", "Tot_Ops"))
+
+flights_temp <- flights_2018 %>%
+  filter(!is.na(Tot_Ops.x)) %>%
+  group_by(Origin) %>%
+  summarize(mean(Dep_Delay)) %>%
+  left_join(airport_ops, by = c("Origin" = "Code")) 
+names(flights_temp)[2] <- "Mean_Dep_Delay"
+flights_temp %>%
+  ggplot(aes(x = Tot_Ops, y = Mean_Dep_Delay)) +
+  geom_point() +
+  geom_hline(yintercept = mean(flights_temp$Mean_Dep_Delay), color = "red", linetype = 2)
+```
+  

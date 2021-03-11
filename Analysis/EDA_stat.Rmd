@@ -1,0 +1,150 @@
+---
+title: "EDA_stat"
+author: "Janice Cessna"
+date: "November 30, 2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(broom)
+library(pls)
+
+flights_2018 <- readRDS("../data/flights_2018.Rds")
+```
+
+
+```{r select data for analysis}
+#flights_2018 <- flights_2018 %>%
+#  filter(Cancelled == "No") %>%
+#  filter(Diverted == "No") 
+```
+
+
+
+##How does Airport performance look at different times of the day? 
+```{r}
+
+```
+
+
+```{r}
+mean_delay_overall <- mean(flights_2018$Dep_Delay)
+```
+The overall mean departure delay for all 2018 flights was `r mean_delay_overall`. When we compare the mean delay for each hour of day segment (H0: mu = `r mean_delay_overall`), we find that... 
+```{r}
+flights_nested <- flights_2018 %>%
+  filter(Cancelled == "No") %>%
+  filter(Diverted == "No") %>%  
+  select(Dep_Delay, Dep_Time_Planned_Local_Hour) %>%
+  mutate(Diff_from_mean = Dep_Delay - mean_delay_overall) %>%
+  arrange(desc(Dep_Time_Planned_Local_Hour)) %>%
+  group_by(Dep_Time_Planned_Local_Hour) %>%
+  nest()
+
+#code below here does not work yet
+flights_nested %>%
+  ggplot(aes(x = data[Dep_Time_Planned_Local_Hour], y = data[Diff_from_mean])) +
+  geom_boxplot()
+
+
+flights_nested <- flights_nested %>%
+  mutate(tout = map(data, ~t.test(Diff_from_mean, data = .))) 
+```
+
+
+
+##Is this pattern consistent throughout the year? 
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Multiple linear regression 
+```{r multiple linear regression}
+mls_fit <- lm(Dep_Delay ~ ., data = flights_2018_EDAstat2)
+mls_tidy <- tidy(mls_fit)
+mls_augment <- augment(mls_fit)
+mls_tidy
+mls_augment
+```
+```{r}
+mls_augment %>%
+  ggplot(aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red", linetype = 2)
+```
+
+
+
+#Principle components regression
+```{r principle components regression}
+#set.seed(2)
+flights_2018_pcr <- flights_2018_EDAstat2 %>%
+  select(-c(1:6))
+pcr_fit <- pcr(Dep_Delay ~., data = flights_2018_pcr, scale = T, validation = "CV")
+summary(pcr_fit)
+```
+
+```{r elbow plots}
+validationplot(pcr_fit, val.type="MSEP", legendpos="topright") # Plots the MSE
+validationplot(pcr_fit, val.type="RMSEP", legendpos="bottomright") # Plots the SquareRoot(MSE) 
+```
+
+```{r loadings summary}
+str(pcr_fit)
+pcr_fit$loadings
+```
+
+```{r PCR with 12 components}
+pcr_fit2 <- pcr(Dep_Delay ~ ., data = flights_2018_pcr, scale = T, ncomp = 12) 
+summary(pcr_fit2)
+```
+
+
+
+#Partial least squares regression
+```{r}
+library(pls)
+
+pls_fit <- plsr(Dep_Delay ~ ., data = flights_2018_pcr, scale = T, validation = "CV")
+summary(pls_fit)
+```
+
+```{r}
+validationplot(pls_fit, val.type = "MSEP", legendpos = "topright") # w/MSE
+validationplot(pls_fit, val.type = "RMSEP", legendpos = "topright") # w/RMSE
+```
+
+```{r}
+pls_fit$loadings
+```
+
+```{r}
+pls_fit2 <-plsr(Dep_Delay ~ ., data = flights_2018_pcr, scale = T, ncomp = 2) 
+summary(pls_fit2)
+```
+
+
+
+#PCR and PLS displayed together
+```{r}
+cbind("PCR RMSE"=sqrt(mean((pcr.pred-Hitters[pred.test,]$Salary)^2)), "PLS RMSE"= sqrt(mean((pls.pred-Hitters[pred.test,]$Salary)^2)))
+```
+

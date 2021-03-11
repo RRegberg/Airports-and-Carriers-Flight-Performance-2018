@@ -1,0 +1,109 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(broom)
+```
+
+
+##Scope
+
+This analysis further explores the late aircraft type delays. How does this compare among the different airlines?
+
+
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+
+
+#Late Aircraft Delays
+
+What does the distribution of late aircraft delays look like?
+
+```{r}
+flights_2018 %>%
+  filter(Late_Ac_Delay>0 & Late_Ac_Delay<400) %>%
+  ggplot(aes(x = Late_Ac_Delay)) +
+  geom_bar()
+```
+
+How is this distributed among the airlines?
+
+```{r}
+flights_2018 %>%
+  filter(Late_Ac_Delay>0) %>%
+  ggplot(aes(x = reorder(Carrier_Name, Late_Ac_Delay, FUN = median), y = Late_Ac_Delay)) +
+  geom_boxplot(aes(group = Carrier_Name)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+It doesn't seem like there are any clear patterns between the airlines. What do the means look like?
+
+```{r}
+flights_2018$Carrier_Name <- as_factor(flights_2018$Carrier_Name)
+
+flights_2018 %>%
+  filter(Late_Ac_Delay>0) %>%
+  group_by(Carrier_Name) %>%
+  summarise(Late_Ac_Mean = mean(Late_Ac_Delay)) %>%
+  mutate(Carrier_Name = fct_reorder(Carrier_Name,Late_Ac_Mean)) %>%
+  ggplot(aes(x = Carrier_Name, y = Late_Ac_Mean)) +
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+What about when adjusting for outliers? A log transformation can be used.
+
+```{r}
+flights_2018$Carrier_Name <- as_factor(flights_2018$Carrier_Name)
+
+flights_2018 %>%
+  filter(Late_Ac_Delay>0) %>%
+  mutate(Late_Ac_Delay_Log = log(Late_Ac_Delay)) %>%
+  group_by(Carrier_Name) %>%
+  summarise(Late_Ac_Mean_Log = mean(Late_Ac_Delay_Log)) %>%
+  mutate(Carrier_Name = fct_reorder(Carrier_Name,Late_Ac_Mean_Log)) %>%
+  ggplot(aes(x = Carrier_Name, y = Late_Ac_Mean_Log)) +
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+
+#Comparing two airlines
+
+```{r}
+carrier1 <- "Hawaiian Airlines Inc."
+carrier2 <- "Mesa Airlines Inc."
+
+flights_2018 %>%
+  filter(Late_Ac_Delay>0) %>%
+  filter(Carrier_Name == carrier1 | Carrier_Name == carrier2) %>%
+  ggplot(aes(x = Carrier_Name, y = Late_Ac_Delay)) +
+  geom_boxplot(aes(group = Carrier_Name)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+flights_2018 %>%
+  filter(Late_Ac_Delay>0) %>%
+  filter(Carrier_Name == carrier1 | Carrier_Name == carrier2) %>%
+  mutate(Late_Ac_Delay_Log = log(Late_Ac_Delay)) %>%
+  t.test(Late_Ac_Delay_Log~Carrier_Name, data = .) %>%
+  tidy() -> tout_late_ac_delay_carrier
+
+exp(tout_late_ac_delay_carrier$estimate)
+exp(c(low = tout_late_ac_delay_carrier$conf.low, high = tout_late_ac_delay_carrier$conf.high))
+```
+
+Late aircraft delays seem to be 2.23 times longer for Mesa Airlines than for Hawaiian. The 95% confidence interval is 1.75, 2.84
+
+
+

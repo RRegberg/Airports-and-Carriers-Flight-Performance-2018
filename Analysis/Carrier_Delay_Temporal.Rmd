@@ -1,0 +1,96 @@
+---
+title: "Data_Import"
+author: "Jorid Topi"
+date: "11/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(broom)
+```
+
+
+##Scope
+
+This analysis explores the carrier delay type by the local hour of the scheduled departure time.  
+
+
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+
+#Temporal Analysis
+
+How do carrier delays look during the hours of the day? Do the delays get longer as the day progresses, or are airlines generally able to catch up?
+
+```{r}
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  group_by(Dep_Time_Planned_Local_Hour) %>%
+  summarize(Carrier_Delay_Hour = mean(Carrier_Delay)) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Carrier_Delay_Hour)) +
+  geom_bar(stat = "identity")
+```
+
+We can see that the late aircraft delay time really jumps out at the early morning hour departures. 
+
+How does this change when log transforming to address outliers?
+
+```{r}
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  mutate(Carrier_Delay_log = log(Carrier_Delay)) %>%
+  group_by(Dep_Time_Planned_Local_Hour) %>%
+  summarize(Carrier_Delay_Hour_Log = mean(Carrier_Delay_log)) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Carrier_Delay_Hour_Log)) +
+  geom_bar(stat = "identity")
+```
+
+
+How does this look for the different airlines?
+
+```{r}
+carrier1<-"JetBlue Airways"
+carrier2<-"Delta Air Lines Inc."
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  filter(Carrier_Name == carrier1 | Carrier_Name == carrier2) %>%
+  group_by(Dep_Time_Planned_Local_Hour, Carrier_Name) %>%
+  summarize(Carrier_Delay_Hour = mean(Carrier_Delay)) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Carrier_Delay_Hour, color = Carrier_Name)) +
+  geom_point() + geom_smooth()
+```
+
+#Comparing Two Different Departure Times of the Day
+
+```{r}
+dep_time1 <- 5
+dep_time2 <- 15
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  filter(Dep_Time_Planned_Local_Hour == dep_time1 | Dep_Time_Planned_Local_Hour == dep_time2) %>%
+  ggplot(aes(x = Dep_Time_Planned_Local_Hour, y = Carrier_Delay)) +
+  geom_boxplot(aes(group = Dep_Time_Planned_Local_Hour)) + scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+flights_2018 %>%
+  filter(Carrier_Delay>0) %>%
+  filter(Dep_Time_Planned_Local_Hour == dep_time1 | Dep_Time_Planned_Local_Hour == dep_time2) %>%
+  mutate(Carrier_Delay_Log = log(Carrier_Delay)) %>%
+  t.test(Carrier_Delay_Log~Dep_Time_Planned_Local_Hour, data = .) %>%
+  tidy() -> tout_carrier_delay_hour
+
+exp(tout_carrier_delay_hour$estimate)
+exp(c(low = tout_carrier_delay_hour$conf.low, high = tout_carrier_delay_hour$conf.high))
+
+```
+Carrier delays are 2.42 times longer for depature times at the 5AM hour than for departure times at the 3PM hour. The 95% CI is 1.91 and 3.07
+

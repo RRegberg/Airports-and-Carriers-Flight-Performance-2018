@@ -1,0 +1,136 @@
+---
+title: "Regression: Nas_Delay on Total Ops"
+author: "Janice Cessna"
+date: "December 5, 2019"
+output: html_document
+urlcolor: "blue"
+params:
+  solutions: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = params$solutions, 
+                      eval       = params$solutions)
+```
+
+    
+```{r, echo = TRUE}
+library(tidyverse)
+library(broom)
+```
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+    
+
+#Data setup
+
+Establishing data frame with reduced set of initial variables and creation of additional variables for regression models below. 
+```{r}
+flights_2018_NAS <- flights_2018 %>%
+  select(Origin,Dep_Time_Planned_Local_Hour, Dep_Delay, 
+         Taxi_Out, Taxi_In, Carrier_Delay, Weather_Delay, Nas_Delay, 
+         Security_Delay, Late_Ac_Delay, Tot_Ops.x) %>%
+  filter(Nas_Delay > 0) %>%  #changed per y variable
+  group_by(Origin) %>% 
+  mutate(Mean_Dep_Delay = mean(Dep_Delay)) %>%
+  mutate(Mean_Taxi_Out = mean(Taxi_Out)) %>%
+  mutate(Mean_Taxi_In = mean(Taxi_In)) %>%
+  mutate(Mean_Carrier_Delay = mean(Carrier_Delay)) %>%
+  mutate(Mean_Weather_Delay = mean(Weather_Delay)) %>%
+  mutate(Mean_Nas_Delay = mean(Nas_Delay)) %>%
+  mutate(Mean_Securit_Delay = mean(Security_Delay)) %>%
+  mutate(Mean_Late_Ac_Delay = mean(Late_Ac_Delay)) %>%
+  mutate(Duplicate_Origin = duplicated(Origin)) %>%
+  filter(Duplicate_Origin == "FALSE")
+```
+
+
+# Regression Model
+
+Plotting mean NAS delay versus total operations by airport. 
+```{r total operations on mean Dep_delay}
+flights_2018_NAS %>%
+  ggplot(aes(x = Tot_Ops.x, y = Mean_Nas_Delay)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = TRUE) +
+  xlab("Total Airport Operations") +
+  ylab("Mean NAS Delay") +
+  labs(title = "Delay trend by operations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0))
+```
+
+Linear regression of mean NAS delay on total operations by airport suggests a slightly decreasing NAS delay as total operations increases. 
+```{r}
+lm_Nas_delay <- lm(Mean_Nas_Delay ~ Tot_Ops.x, data = flights_2018_NAS)
+lm_Nas_delay_tidy <- tidy(lm_Nas_delay)
+lm_Nas_delay_tidy
+lm_Nas_delay_augment <- augment(lm_Nas_delay)
+lm_Nas_delay_augment
+```
+
+A plot of the regression residuals shows a linear relationship, but variance seems different for different values of x.  
+```{r}
+lm_Nas_delay_augment %>%
+  ggplot(aes(x = .fitted, y = .std.resid)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)
+```
+
+After logging x, the plot of mean NAS delay on total operations now looks like:   
+```{r}
+flights_2018_NAS %>%
+  ggplot(aes(x = log2(Tot_Ops.x), y = Mean_Nas_Delay)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = TRUE) +
+  xlab("Total Airport Operations") +
+  ylab("Mean NAS Delay") +
+  labs(title = "Delay trend by operations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0))
+```
+
+The revised linear regression model is now: 
+```{r}
+lm_Nas_delay <- lm(Mean_Nas_Delay ~ log2(Tot_Ops.x), data = flights_2018_NAS)
+lm_Nas_delay_tidy <- tidy(lm_Nas_delay)
+lm_Nas_delay_tidy
+lm_Nas_delay_augment <- augment(lm_Nas_delay)
+```
+
+And the revised plot of residuals shows variance is more evenly distributed, although there seems to be a bit of skew for all x.  
+```{r}
+lm_Nas_delay_augment %>%
+  ggplot(aes(x = .fitted, y = .std.resid)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)
+```
+
+For curiosity, let's see what the scatterplot looks like with both x and y logged. 
+```{r}
+flights_2018_NAS %>%
+  ggplot(aes(x = log2(Tot_Ops.x), y = log2(Mean_Nas_Delay))) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = TRUE) +
+  xlab("Total Airport Operations") +
+  ylab("Mean NAS Delay") +
+  labs(title = "Delay trend by operations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0))
+```
+
+The linear relationship is now showing as a positive trend, so this isn't valid compared to the analysis above. If the relationship were valid, the revised linear regression model would be:  
+```{r}
+lm_Nas_delay <- lm(log2(Mean_Nas_Delay) ~ log2(Tot_Ops.x), data = flights_2018_NAS)
+lm_Nas_delay_tidy <- tidy(lm_Nas_delay)
+lm_Nas_delay_tidy
+lm_Nas_delay_augment <- augment(lm_Nas_delay)
+```
+
+Interestingly, the revised plot of residuals with both x and y logged has the best distribution of all.
+```{r}
+lm_Nas_delay_augment %>%
+  ggplot(aes(x = .fitted, y = .std.resid)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)
+```
+
+

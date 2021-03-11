@@ -1,0 +1,1179 @@
+---
+title: "BTS_EDA"
+author: "Rachel Regberg"
+date: "11/9/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(lubridate))
+suppressPackageStartupMessages(library(car))
+suppressPackageStartupMessages(library(GGally))
+suppressPackageStartupMessages(library(corrplot))
+suppressPackageStartupMessages(library(Hmisc))
+
+suppressPackageStartupMessages(library(psych))
+```
+
+## Read in Data
+
+
+```{r}
+#These libraries are required for reading, parsing, and tidying the data
+library(tidyverse)
+library(lubridate)
+
+#This function takes in a .csv file with the data format laid out from the previous section, containing the minimum set of variables. The file is converted to an R data frame with the variable names transformed for readability. Some column types that are produced by the read_csv parser based on heuristics do not contain the desired type, so these are "force"" parsed to that desired type. 
+data_reader <- function(data_file){
+  output_file <- read_csv(data_file, 
+                  skip = 1,
+                  col_names = c("Date", "Carrier_Code", "Origin", "Origin_City", "Dest", "Dest_City",
+                                "Dep_Time_Planned", "Dep_Time_Actual", "Wheels_Off", "Wheels_On",
+                                "Arr_Time_Planned", "Arr_Time_Actual", "Cancelled", "Cancellation_Code",
+                                "Diverted", "Air_Time", "Distance", "Empty"),
+                  col_types = cols(
+                    Cancelled = col_factor(),
+                    Cancellation_Code = col_factor(),
+                    Diverted = col_factor())
+                  )
+  return(output_file)
+}
+
+#This function takes an R data frame as input and performs tidy operations on it. The variables containing times are parsed to the correct time formate using lubridate. The Origin and Destination cities are separated into city name and state columns. The computed subset of variables specified in the previous section are generated here. Some factor variables are re-coded based on the lookup tables from BTS 
+data_tidy <- function(input_frame){
+  input_frame %>%
+    mutate(Date = ymd(Date),
+           Dep_Time_Planned = hm(str_replace(Dep_Time_Planned, "(\\d\\d)(\\d\\d)", "\\1 \\2"), quiet = TRUE),
+           Dep_Time_Actual = hm(str_replace(Dep_Time_Actual, "(\\d\\d)(\\d\\d)", "\\1 \\2"), quiet = TRUE),
+           Arr_Time_Planned = hm(str_replace(Arr_Time_Planned, "(\\d\\d)(\\d\\d)", "\\1 \\2"), quiet = TRUE),
+           Arr_Time_Actual = hm(str_replace(Arr_Time_Actual, "(\\d\\d)(\\d\\d)", "\\1 \\2"), quiet = TRUE),
+           Wheels_Off = hm(str_replace(Wheels_Off, "(\\d\\d)(\\d\\d)", "\\1 \\2"), quiet = TRUE),
+           Wheels_On = hm(str_replace(Wheels_On, "(\\d\\d)(\\d\\d)", "\\1 \\2"), quiet = TRUE),
+           Air_Time = dminutes(Air_Time),
+           Dep_Delay = Dep_Time_Actual - Dep_Time_Planned,
+           Arr_Delay = Arr_Time_Actual - Arr_Time_Planned,
+           Taxi_Out = Wheels_Off - Dep_Time_Actual,
+           Taxi_In = Arr_Time_Actual - Wheels_On,
+           Cancelled = fct_recode(Cancelled, "Yes" = "1.00", "No" = "0.00"),
+           Diverted = fct_recode(Diverted, "Yes" = "1.00", "No" = "0.00"),
+           Cancellation_Code = fct_recode(Cancellation_Code, 
+                                          "Carrier" = "A", 
+                                          "Weather" = "B",
+                                          "National Air System" = "C",
+                                          "Security" = "D")) %>%
+    separate(Origin_City, into = c("Origin_City", "Origin_State"), sep = ", ") %>%
+    separate(Dest_City, into = c("Dest_City", "Dest_State"), sep = ", ")-> output_frame
+  return(output_frame)
+}
+
+#Placeholder for other tidy functions:
+#Todo: (1) Create tidy function to check for erroneous data using heuristics. For example, there are some flights that have a departure time and wheels off time when the flight is cancelled. (2) A function may be required to merge in the airline lookup table, since the airlines are observed by code in the data set
+
+#Read in the unique carrier code lookup from BTS 
+lookup_carrier <- read_csv("../data/lookup_carrier.csv",
+                           col_names = c("Code", "Carrier_Name"))
+
+
+#Create a list of the files in the "data" driectory, containing the file names
+data_files <- list.files(path = "../data")
+
+#Create a list of the flight data files
+flight_data_index <-str_detect(data_files, "flight_data")
+flight_data_files <- data_files[flight_data_index]
+
+#Create the data list that will used for analysis. The list elements will containg data frames for each calendar month
+data_list <- vector(mode = "list")
+
+#Create a data frame for flights in 2018, to be populated with random samples from each month of 2018
+flights_2018 <- c()
+
+#Populate the data list with data frames generated from the files in the "data" directory. Each file is read in using the "data_reader" function and tidy operations are performed by the "data_tidy" function. Each generated data frame is then inserted into the "data_list" with the element name generated from the "month_year" portion of the file name. The file name format must contain "..._month_year.csv", with "month" being a 3 letter abbreviation for each month. 
+for (i in seq_along(flight_data_files)){
+  data_list_index <- str_extract(flight_data_files[i], '....(\\d+)')
+  filename <- str_c("../data/", flight_data_files[i])
+  flight_file_input <- data_reader(filename)
+  merge_carrier <- left_join(flight_file_input, lookup_carrier, by = c("Carrier_Code" = "Code"))
+  data_list[[data_list_index]] <- data_tidy(merge_carrier)
+  flights_2018 <- rbind(flights_2018, sample_n(data_list[[data_list_index]], 1000))
+}
+```
+
+
+
+Remove unnecessary items from the Environment.
+```{r}
+rm(data_list, lookup_carrier, merge_carrier, data_files, flight_data_files, flight_data_index, flight_file_input, data_list_index, filename, data_reader, data_tidy)
+```
+
+```{r}
+rm(a)
+```
+
+
+Correct `Dep_Delay`, `Arr_Delay`, `Taxi_Out`, and `Taxi_In` variables to show correct duration. 
+```{r conversion of duration subtraction, message=FALSE, warning=FALSE}
+flights_2018$Dep_Delay <- as.integer(as.duration(flights_2018$Dep_Time_Actual) -
+                                       as.duration(flights_2018$Dep_Time_Planned))/60
+flights_2018$Arr_Delay <- as.integer(as.duration(flights_2018$Arr_Time_Actual) -
+                                       as.duration(flights_2018$Arr_Time_Planned))/60
+flights_2018$Taxi_Out <- as.integer(as.duration(flights_2018$Wheels_Off) -
+                                      as.duration(flights_2018$Dep_Time_Actual))/60
+flights_2018$Taxi_In <- as.integer(as.duration(flights_2018$Arr_Time_Actual) -
+                                     as.duration(flights_2018$Wheels_On))/60
+```
+
+```{r}
+#adds month, day of month, and weekday for each observation
+flights_2018 <- flights_2018 %>%
+  mutate(Month = month(Date)) %>%
+  mutate(Day = mday(Date)) %>%
+  mutate(Weekday = wday(Date, label = TRUE)) 
+#converts planned departure time to integer time for analysis by time of day
+hour <- as.character(hour(flights_2018$Dep_Time_Planned))
+minute <- as.character(minute(flights_2018$Dep_Time_Planned))
+for (i in seq_along(hour)) {
+  ifelse(hour[i] %in% as.character(seq(1,9,1)), hour[i] <- str_c("0",hour[i]), hour[i])
+}
+for (i in seq_along(minute)) {
+  ifelse(minute[i] %in% as.character(seq(0,9,1)), minute[i] <- str_c("0",minute[i]), minute[i])
+}
+hour_minute <- as.integer(str_c(hour, minute))
+flights_2018$Dep_Time_Planned_Time <- hour_minute
+rm(hour, hour_minute, minute)
+#converts planned arrival time to integer time for analysis by time of day
+hour <- as.character(hour(flights_2018$Arr_Time_Planned))
+minute <- as.character(minute(flights_2018$Arr_Time_Planned))
+for (i in seq_along(hour)) {
+  ifelse(hour[i] %in% as.character(seq(1,9,1)), hour[i] <- str_c("0",hour[i]), hour[i])
+}
+for (i in seq_along(minute)) {
+  ifelse(minute[i] %in% as.character(seq(0,9,1)), minute[i] <- str_c("0",minute[i]), minute[i])
+}
+hour_minute <- as.integer(str_c(hour, minute))
+flights_2018$Arr_Time_Planned_Time <- hour_minute
+rm(hour, hour_minute, minute)
+```
+
+```{r}
+flights_2018 %>%
+  mutate(Carrier_Code=as.factor(Carrier_Code),
+         Origin=as.factor(Origin),
+         Origin_City=as.factor(Origin_City),
+         Origin_State=as.factor(Origin_State),
+         Dest=as.factor(Dest),
+         Dest_City=as.factor(Dest_City),
+         Dest_State=as.factor(Dest_State),
+         Cancelled=as.factor(Cancelled),
+         Cancellation_Code=as.factor(Cancellation_Code),
+         Diverted=as.factor(Diverted),
+         Carrier_Name=as.factor(Carrier_Name),
+         Air_Time=as.double(Air_Time)) -> flights_2018
+
+glimpse(flights_2018)
+summary(flights_2018[c(2:8, 15:19, 21:22)]) 
+```
+
+Very few flights were diverted. A significant portion of the cancelled flights were due to "NA's".
+
+Total NA's in select variables:  
+```{r message=FALSE, warning=FALSE}
+#returns NAs for factor-related variables to verify they match the number of cancelled flights. 
+flights_2018[c(15:17, 21:22)] %>% 
+  summarize_all(funs(sum(is.na(.)))) 
+```
+As noticed above, `Cancellation_Code` and `Dep_Delay` have significant NAs.
+
+```{r}
+flights_cancel <- flights_2018 %>%
+  filter(Cancelled == "Yes")
+flights_divert <- flights_2018 %>%
+  filter(Diverted == "Yes")
+```
+  
+```{r}
+mean_arr_delay <- aggregate(Arr_Delay~Carrier_Code + Month, data=flights_2018, mean)
+mean_arr_delay %>%
+  arrange(desc(Arr_Delay))
+
+mean_dep_delay <- aggregate(Dep_Delay~Carrier_Code + Month, data=flights_2018, mean)
+mean_dep_delay %>%
+  arrange(desc(Dep_Delay))
+```
+October seems to have the highest average Arrival and Departure Delay, both with the G4 Carrier Code..
+
+
+
+```{r}
+Delays <- aggregate(cbind(Arr_Delay, Dep_Delay) ~ Carrier_Code, flights_2018, mean)
+Delays 
+```
+
+
+```{r}
+flights_2018 %>%
+  group_by(Carrier_Code, Carrier_Name) %>%
+  summarise(Mean_Distance = mean(Distance, na.rm=TRUE),
+            Mean_Arr_Delay = mean(Arr_Delay, na.rm=TRUE),
+            Mean_Dep_Delay = mean(Dep_Delay, na.rm=TRUE),
+            Num_Flights = n())
+
+
+
+flights_2018 %>%
+  group_by(Carrier_Code, Carrier_Name) %>%
+  summarise(Max_Distance = max(Distance, na.rm=TRUE),
+            Max_Arr_Delay = max(Arr_Delay, na.rm=TRUE),
+            Max_Dep_Delay = max(Dep_Delay, na.rm=TRUE),
+            Num_Flights = n()) 
+```
+
+Top 10 Airlines
+```{r, message=FALSE}
+flights_2018 %>%
+  group_by(Carrier_Name) %>%
+  summarise(Num_Carrier = n()) %>%
+  arrange(desc(Num_Carrier)) %>%
+  top_n(10)
+```
+  
+Top 10 Origin Cities
+```{r, message = FALSE}
+flights_2018 %>%
+  group_by(Origin_City) %>%
+  summarise(Num_O_City = n()) %>%
+  arrange(desc(Num_O_City)) %>%
+  top_n(10)
+```
+
+Top 10 Origin States
+```{r, message=FALSE}
+flights_2018 %>%
+  group_by(Origin_State) %>%
+  summarise(Num_O_State = n()) %>%
+  arrange(desc(Num_O_State)) %>%
+  top_n(10)
+```
+
+Top 10 Destination Cities
+```{r, message=FALSE}
+flights_2018 %>%
+  group_by(Dest_City) %>%
+  summarise(Num_D_Cities = n()) %>%
+  arrange(desc(Num_D_Cities)) %>%
+  top_n(10)
+```
+
+
+Top 10 Destination States
+```{r, message=FALSE}
+flights_2018 %>%
+  group_by(Dest_State) %>%
+  summarise(Num_D_State = n()) %>%
+  arrange(desc(Num_D_State)) %>%
+  top_n(10)
+```
+
+Top 10 Carriers
+```{r, message = FALSE}
+flights_2018 %>%
+  group_by(Carrier_Code) %>%
+  summarise(Num_Carrier = n()) %>%
+  arrange(desc(Num_Carrier)) %>%
+  top_n(10)
+```
+
+
+  
+## Plots - Response Variables
+
+Departure Delay
+```{r, warning=FALSE}
+ggplot(flights_2018, aes(x = Dep_Delay)) +
+  geom_histogram(binwidth = 60) +
+  theme_bw() +
+  xlab("Departure Delay")
+```
+We can see it is skewed to the right which indicates more departure delays.
+
+
+Arrival Delay 
+```{r, warning=FALSE, message=FALSE}
+ggplot(flights_2018, aes(x = Arr_Delay)) +
+  geom_histogram(bindwidth = 60) +
+  theme_bw() +
+  xlab("Arrival Delay")
+```
+We can see it is skewed to the right which indicates more arrival delays.
+
+
+Cancelled
+```{r, warning=FALSE}
+ggplot(flights_2018, aes(x = Cancelled)) +
+  geom_bar() +
+  theme_bw() +
+  xlab("Cancelled")
+```
+A significant amount of flights are cancelled.
+
+
+Cancellation Code
+```{r, warning=FALSE}
+flights_2018 %>% 
+  filter(!is.na(Cancellation_Code)) %>%
+  ggplot(aes(x = Cancellation_Code)) +
+  geom_bar() +
+  theme_bw() +
+  xlab("Cancellation Code")
+```
+Weather is the biggest factor for cancelled flights.
+
+
+Diverted
+```{r, warning=FALSE}
+ggplot(flights_2018, aes(x = Diverted)) +
+  geom_bar() +
+  theme_bw() +
+  xlab("Diverted")
+```
+Very few flights are diverted.
+
+
+Carriers
+```{r, warning=FALSE}
+ggplot(flights_2018, aes(x = Carrier_Code)) +
+  geom_bar() +
+  theme_bw() +
+  xlab("Carrier")
+```
+WN is the top carrier code in this year.
+
+
+Carrier Name
+```{r, warning=FALSE}
+ggplot(flights_2018, aes(x = Carrier_Name)) +
+  geom_bar() +
+  theme_bw() +
+  xlab("Carrier Name") +
+  coord_flip()
+```
+Southwest Airlines Co is the top carrier in this year.
+
+
+## Plots - Explanatory Variables
+
+Air Time
+```{r, warning=FALSE, message=FALSE}
+ggplot(flights_2018, aes(x = Air_Time)) +
+  geom_histogram() +
+  theme_bw() +
+  xlab("Air Time")
+```
+
+```{r}
+flights_2018 %>% 
+  summarise(mean_air = mean(Air_Time))
+
+class(flights_2018$Air_Time)
+```
+
+
+Distance
+```{r, message=FALSE, warning=FALSE}
+ggplot(flights_2018, aes(x = Distance)) +
+  geom_histogram() +
+  geom_vline(xintercept = 802, lty = 2, color = "red") +
+
+  theme_bw() +
+  xlab("Distance")
+
+flights_2018 %>% 
+  summarise(mean = mean(Distance))
+```
+Skewed to longer distance flights. 
+
+Origin (top 20)
+```{r, warning=FALSE, message=FALSE}
+flights_2018 %>%
+  group_by(Origin) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(Origin, -Num_Origin), y = Num_Origin)) +
+  geom_bar(stat = "identity") +
+  theme_bw() + 
+  xlab("Top 20 Origin") +
+  ylab("Count")
+```
+
+
+Origin Cities (Top 20)
+```{r, warning=FALSE, message=FALSE}
+flights_2018 %>%
+  group_by(Origin_City) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(Origin_City, Num_Origin), y = Num_Origin)) +
+  geom_bar(stat = "identity") +
+  theme_bw() + 
+  xlab("Top 20 Origin Cities") +
+  ylab("Count") +
+  coord_flip()
+```
+
+Origin States (Top 20)
+```{r, warning=FALSE, message=FALSE}
+flights_2018 %>%
+  group_by(Origin_State) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(Origin_State, -Num_Origin), y = Num_Origin)) +
+  geom_bar(stat = "identity") +
+  theme_bw() + 
+  xlab("Top 20 Origin States") +
+  ylab("Count") 
+```
+
+
+
+Destination (Top 20)
+```{r, warning=FALSE}
+flights_2018 %>%
+  group_by(Dest) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(Dest, -Num_Dest), y = Num_Dest)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() + 
+  xlab("Top 20 Destination") +
+  ylab("Count")
+```
+
+Destination Cities (Top 20)
+```{r, warning=FALSE}
+flights_2018 %>%
+  group_by(Dest_City) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(Dest_City, Num_Dest), y = Num_Dest)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() + 
+  xlab("Top 20 Destination Cities") +
+  ylab("Count") +
+  coord_flip()
+```
+
+Destination States (Top 20)
+```{r, warning=FALSE}
+flights_2018 %>%
+  group_by(Dest_State) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(Dest_State, -Num_Dest), y = Num_Dest)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() + 
+  xlab("Top 20 Destination States") +
+  ylab("Count") 
+```
+
+
+
+Groouped by Taxi_In
+```{r, message=FALSE, warning=FALSE}
+ggplot(flights_2018, aes(x = Taxi_In)) +
+  geom_histogram() +
+  theme_bw() +
+  xlab("Taxi In")
+```
+
+Grouped by Taxi_Out
+```{r, message=FALSE, warning=FALSE}
+ggplot(flights_2018, aes(x = Taxi_Out)) +
+  geom_histogram() +
+  theme_bw() +
+  xlab("Taxi Out")
+```
+
+
+## Plots - Response vs Explanatory
+
+Departure Delay vs Carrier Explanatory Variables
+```{r}
+# Carrier
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  ggplot(aes(x = Carrier_Code, y = Dep_Delay)) +
+  geom_boxplot() +
+  ylab("Departure Delay") +
+  theme_bw()
+
+ggplot(flights_2018, aes(x = Carrier_Code, y = log(Dep_Delay), fill = Carrier_Code)) + 
+  geom_boxplot(position = "dodge")
+```
+
+
+```{r}
+# Air Time
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  ggplot(aes(x = Air_Time, y = Dep_Delay)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw()
+```
+
+```{r}
+# Distance
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  ggplot(aes(x = Distance, y = Dep_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Origin 
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  ggplot(aes(x = Origin, y = Dep_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Origin - Filtered top 20 Origins
+flights_2018 %>%
+  group_by(Origin, Dep_Delay) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Dep_Delay > 0) %>% 
+  head(20) %>%
+  ggplot(aes(x = Origin, y = Dep_Delay, alpha = .1)) +
+  geom_boxplot() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+
+# Origin Cities - Top
+flights_2018 %>%
+  group_by(Origin_City, Dep_Delay) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Dep_Delay > 0) %>% 
+  head(20) %>%
+  ggplot(aes(x = Origin_City, y = Dep_Delay, alpha = .1)) +
+  geom_boxplot() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none") + 
+  coord_flip()
+```
+
+```{r}
+# Origin States - Top 
+flights_2018 %>%
+  group_by(Origin_State, Dep_Delay) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Dep_Delay > 0) %>% 
+  head(20) %>%
+  ggplot(aes(x = Origin_State, y = Dep_Delay, alpha = .1)) +
+  geom_boxplot() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Destination - Filtered by top 20 desinations
+flights_2018 %>%
+  group_by(Dest, Dep_Delay) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Dep_Delay > 0) %>% 
+  head(20) %>% 
+  ggplot(aes(x = Dest, y = Dep_Delay, alpha = .1)) +
+  geom_boxplot() +
+  xlab("Destination") +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Destination Cities - Top 
+flights_2018 %>%
+  group_by(Dest_City, Dep_Delay) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Dep_Delay > 0) %>% 
+  head(20) %>% 
+  ggplot(aes(x = Dest_City, y = Dep_Delay, alpha = .1)) +
+  geom_boxplot() +
+  xlab("Destination Cities") +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  coord_flip()
+```
+
+```{r}
+# Destination States - Top 
+flights_2018 %>%
+  group_by(Dest_State, Dep_Delay) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Dep_Delay > 0) %>% 
+  head(20) %>% 
+  ggplot(aes(x = Dest_State, y = Dep_Delay, alpha = .1)) +
+  geom_boxplot() +
+  xlab("Destination States") +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none") 
+```
+
+```{r}
+# Taxi In
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  filter(!is.na(Taxi_In)) %>%
+  ggplot(aes(x = Taxi_In, y = Dep_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Taxi Out
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  filter(!is.na(Taxi_Out)) %>%
+  ggplot(aes(x = Taxi_Out, y = Dep_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+
+Cancellation/Cancellation Codes vs Carrier Explanatory Variables
+```{r}
+# Carrier
+flights_2018 %>%
+  filter(Cancelled == "Yes") %>%
+  ggplot(aes(x=Carrier_Code)) + 
+  geom_bar() +
+  theme_bw()
+```
+
+```{r}
+# Air Time
+
+```
+
+```{r}
+# Distance
+flights_2018 %>%
+  filter(Cancelled == "Yes") %>%
+  ggplot(aes(x=Distance)) + 
+  geom_histogram() +
+  geom_vline(xintercept = 802, lty = 2, color = "red") +
+  theme_bw()
+```
+
+```{r}
+# Origin
+flights_2018 %>%
+  group_by(Origin, Cancelled) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Cancelled == "Yes") %>% 
+  head(20) %>% 
+  ggplot(aes(x=Origin, y=Num_Origin)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw()
+```
+
+```{r}
+# Origin Cities
+flights_2018 %>%
+  group_by(Origin_City, Cancelled) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Cancelled == "Yes") %>% 
+  head(20) %>% 
+  ggplot(aes(x=reorder(Origin_City, Num_Origin), y=Num_Origin)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  coord_flip()
+```
+
+```{r}
+# Origin States
+flights_2018 %>%
+  group_by(Origin_State, Cancelled) %>%
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Cancelled == "Yes") %>% 
+  head(20) %>% 
+  ggplot(aes(x=reorder(Origin_State, Num_Origin), y=Num_Origin)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  coord_flip()
+```
+
+```{r}
+# Destination
+flights_2018 %>%
+  group_by(Dest, Cancelled) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Cancelled == "Yes") %>% 
+  head(20) %>% 
+  ggplot(aes(x=reorder(Dest, -Num_Dest), y=Num_Dest)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw()
+```
+
+```{r}
+
+
+# Destination Cities
+flights_2018 %>%
+  group_by(Dest_City, Cancelled) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Cancelled == "Yes") %>% 
+  head(20) %>% 
+  ggplot(aes(x=reorder(Dest_City, Num_Dest), y=Num_Dest)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  coord_flip()
+```
+
+```{r}
+# Destination States
+flights_2018 %>%
+  group_by(Dest_State, Cancelled) %>%
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Cancelled == "Yes") %>% 
+  head(20) %>% 
+  ggplot(aes(x=reorder(Dest_State, -Num_Dest), y=Num_Dest)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw() 
+```
+
+```{r}
+# Taxi_In
+
+
+# Taxi_Out
+
+```
+
+
+
+Diverted vs Carrier Explanatory Variables
+```{r}
+# Carrier
+flights_2018 %>%
+  filter(Diverted == "Yes") %>%
+  ggplot(aes(x=Carrier_Code)) + 
+  geom_bar() +
+  theme_bw()
+```
+
+```{r}
+# Air Time
+```
+
+```{r}
+
+# Distance
+flights_2018 %>%
+  filter(Diverted == "Yes") %>%
+  ggplot(aes(x=Distance)) + 
+  geom_histogram() +
+  theme_bw()
+```
+
+```{r}
+# Origin
+flights_2018 %>%
+  group_by(Origin, Diverted) %>% 
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Diverted == "Yes") %>%
+  head(20) %>% 
+  ggplot(aes(x=reorder(Origin, -Num_Origin), y=Num_Origin)) + 
+  geom_bar(stat="identity") +
+  theme_bw()
+```
+
+
+```{r}
+# Origin Cities
+flights_2018 %>%
+  group_by(Origin_City, Diverted) %>% 
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Diverted == "Yes") %>%
+  head(20) %>% 
+  ggplot(aes(x=reorder(Origin_City, Num_Origin), y=Num_Origin)) + 
+  geom_bar(stat="identity") +
+  theme_bw() +
+  coord_flip()
+```
+
+```{r}
+# Origin States
+flights_2018 %>%
+  group_by(Origin_State, Diverted) %>% 
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Diverted == "Yes") %>%
+  head(20) %>% 
+  ggplot(aes(x=reorder(Origin_State, -Num_Origin), y=Num_Origin)) + 
+  geom_bar(stat="identity") +
+  theme_bw() 
+```
+
+```{r}
+# Destination
+flights_2018 %>%
+  group_by(Dest, Diverted) %>% 
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Diverted == "Yes") %>%
+  head(20) %>% 
+  ggplot(aes(x=reorder(Dest, -Num_Dest), y = Num_Dest)) + 
+  geom_bar(stat="identity") +
+  theme_bw()
+```
+
+
+```{r}
+
+
+# Destination Cities
+flights_2018 %>%
+  group_by(Dest_City, Diverted) %>% 
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Diverted == "Yes") %>%
+  head(20) %>% 
+  ggplot(aes(x=reorder(Dest_City, Num_Dest), y = Num_Dest)) + 
+  geom_bar(stat="identity") +
+  theme_bw() +
+  coord_flip()
+```
+
+```{r}
+# Destination States
+flights_2018 %>%
+  group_by(Dest_State, Diverted) %>% 
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Diverted == "Yes") %>%
+  head(20) %>% 
+  ggplot(aes(x=reorder(Dest_State, -Num_Dest), y = Num_Dest)) + 
+  geom_bar(stat="identity") +
+  theme_bw() 
+```
+
+```{r}
+# Taxi_In
+
+
+# Taxi_Out
+
+```
+
+
+
+Arrival Delay vs Carrier Explanatory Variables
+```{r}
+# Carrier
+flights_2018 %>%
+  filter(Arr_Delay > 0) %>%
+  ggplot(aes(x = Carrier_Code, y = Arr_Delay)) +
+  geom_boxplot() +
+  ylab("Departure Delay") +
+  theme_bw()
+
+ggplot(flights_2018, aes(x = Carrier_Code, y = log(Arr_Delay), fill = Carrier_Code)) + 
+  geom_boxplot(position = "dodge")
+```
+
+```{r}
+# Air Time
+flights_2018 %>%
+  filter(Arr_Delay > 0) %>%
+  ggplot(aes(x = Air_Time, y = Arr_Delay)) +
+  geom_point() +
+  ylab("Arrival Delay") +
+  theme_bw()
+```
+
+```{r}
+# Distance
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  ggplot(aes(x = Distance, y = Dep_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Origin - Need to filter for only over 100 
+flights_2018 %>%
+  group_by(Origin, Arr_Delay) %>% 
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Arr_Delay > 0) %>%
+  head(20) %>% 
+  ggplot(aes(x = Origin, y = Arr_Delay, alpha = .1)) +
+  geom_boxplot() +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+
+# Origin City
+flights_2018 %>%
+  group_by(Origin_City, Arr_Delay) %>% 
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Arr_Delay > 0) %>%
+  head(20) %>% 
+  ggplot(aes(x = Origin_City, y = Arr_Delay, alpha = .1)) +
+  geom_boxplot() +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Origin State
+flights_2018 %>%
+  group_by(Origin_State, Arr_Delay) %>% 
+  summarise(Num_Origin = n()) %>%
+  arrange(desc(Num_Origin)) %>%
+  filter(Arr_Delay > 0) %>%
+  head(20) %>% 
+  ggplot(aes(x = Origin_State, y = Arr_Delay, alpha = .1)) +
+  geom_boxplot() +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Destination - Need to filter for only over 100
+flights_2018 %>%
+  group_by(Dest, Arr_Delay) %>% 
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Arr_Delay > 0) %>%
+  head(20) %>% 
+  ggplot(aes(x = Dest, y = Arr_Delay, alpha = .1)) +
+  geom_boxplot() +
+  xlab("Destination") +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+
+# Destination Cities
+flights_2018 %>%
+  group_by(Dest_City, Arr_Delay) %>% 
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Arr_Delay > 0) %>%
+  head(20) %>% 
+  ggplot(aes(x = Dest_City, y = Arr_Delay, alpha = .1)) +
+  geom_boxplot() +
+  xlab("Destination Cities") +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Destination States
+flights_2018 %>%
+  group_by(Dest_State, Arr_Delay) %>% 
+  summarise(Num_Dest = n()) %>%
+  arrange(desc(Num_Dest)) %>%
+  filter(Arr_Delay > 0) %>%
+  head(20) %>% 
+  ggplot(aes(x = Dest_State, y = Arr_Delay, alpha = .1)) +
+  geom_boxplot() +
+  xlab("Destination Cities") +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Taxi In
+flights_2018 %>%
+  filter(Dep_Delay > 0) %>%
+  filter(!is.na(Taxi_In)) %>%
+  ggplot(aes(x = Taxi_In, y = Dep_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Departure Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Taxi Out
+flights_2018 %>%
+  filter(Arr_Delay > 0) %>%
+  filter(!is.na(Taxi_Out)) %>%
+  ggplot(aes(x = Taxi_Out, y = Arr_Delay, alpha = .1)) +
+  geom_point() +
+  ylab("Arrival Delay") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+
+
+```{r}
+flights_2018 %>%
+  group_by(Month, Carrier_Code) %>%
+  summarise(Mean_Dep_Delay = mean(Dep_Delay, na.rm=TRUE)) -> temp 
+  qplot(Month, Mean_Dep_Delay, data=temp) +
+  geom_line() +
+  facet_wrap(~Carrier_Code)
+  
+  
+flights_2018 %>%
+  group_by(Day, Carrier_Code) %>%
+  summarise(Mean_Dep_Delay = mean(Dep_Delay, na.rm=TRUE)) -> temp2
+  qplot(Day, Mean_Dep_Delay, data=temp2) +
+  geom_line() +
+  facet_wrap(~Carrier_Code)
+```
+
+
+Air time vs Departure Delay
+```{r}
+# Carrier Code
+flights_2018 %>% 
+  mutate(Dep_Delay = as.logical(Dep_Delay, na.rm=TRUE)) %>%
+  mutate(Dep_Delay = as.numeric(Dep_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Dep_Delay)) %>%
+  ggplot(aes(x = Carrier_Code, y = Air_Time, color = Dep_Delay)) +
+  geom_point() +
+  theme_bw()
+
+
+# Airlines - Top 10
+flights_2018 %>%
+  filter(Carrier_Name == c("Southwest Airlines Co.", "Delta Airlines Inc.", "American Airlines Inc.", "SkyWest Airlines Inc.", "United Air Lines Inc.",  "Republic Airline", "JetBlue Airways", "Envoy Air", "PSA Airlines Inc.", "Alaska Airlines Inc.")) %>% 
+  mutate(Dep_Delay = as.logical(Dep_Delay, na.rm=TRUE)) %>%
+  mutate(Dep_Delay = as.numeric(Dep_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Dep_Delay)) %>% 
+  ggplot(aes(x = Carrier_Name, y = Air_Time, color = Dep_Delay)) +
+  geom_point() +
+  coord_flip() +
+  theme_bw()
+```
+
+Air time vs Arrival Delay
+```{r}
+flights_2018 %>% 
+  mutate(Arr_Delay = as.logical(Arr_Delay, na.rm=TRUE)) %>%
+  mutate(Arr_Delay = as.numeric(Arr_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Arr_Delay)) %>%
+  ggplot(aes(x = Carrier_Code, y = Air_Time, color = Arr_Delay)) +
+  geom_point() +
+  theme_bw()
+
+
+
+flights_2018 %>% 
+  filter(Carrier_Name == c("Southwest Airlines Co.", "Delta Airlines Inc.", "American Airlines Inc.", "SkyWest Airlines Inc.", "United Air Lines Inc.",  "Republic Airline", "JetBlue Airways", "Envoy Air", "PSA Airlines Inc.", "Alaska Airlines Inc.")) %>% 
+  mutate(Arr_Delay = as.logical(Arr_Delay, na.rm=TRUE)) %>%
+  mutate(Arr_Delay = as.numeric(Arr_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Arr_Delay)) %>%
+  ggplot(aes(x = Carrier_Name, y = Air_Time, color = Arr_Delay)) +
+  geom_point() + 
+  coord_flip() +
+  theme_bw()
+```
+
+
+Distance - Carrier - Departure Delay
+```{r}
+# Carrier Code
+flights_2018 %>% 
+  mutate(Dep_Delay = as.logical(Dep_Delay, na.rm=TRUE)) %>%
+  mutate(Dep_Delay = as.numeric(Dep_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Dep_Delay)) %>%
+  ggplot(aes(x = Carrier_Code, y = Distance, color = Dep_Delay)) +
+  geom_point() +
+  theme_bw()
+
+
+# Airlines - Top 10
+flights_2018 %>%
+  filter(Carrier_Name == c("Southwest Airlines Co.", "Delta Airlines Inc.", "American Airlines Inc.", "SkyWest Airlines Inc.", "United Air Lines Inc.",  "Republic Airline", "JetBlue Airways", "Envoy Air", "PSA Airlines Inc.", "Alaska Airlines Inc.")) %>% 
+  mutate(Dep_Delay = as.logical(Dep_Delay, na.rm=TRUE)) %>%
+  mutate(Dep_Delay = as.numeric(Dep_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Dep_Delay)) %>% 
+  ggplot(aes(x = Carrier_Name, y = Distance, color = Dep_Delay)) +
+  geom_point() +
+  coord_flip() +
+  theme_bw()
+```
+
+
+
+Distance - Carrier - Arrival Delay
+```{r}
+flights_2018 %>% 
+  mutate(Arr_Delay = as.logical(Arr_Delay, na.rm=TRUE)) %>%
+  mutate(Arr_Delay = as.numeric(Arr_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Arr_Delay)) %>%
+  ggplot(aes(x = Carrier_Code, y = Distance, color = Arr_Delay)) +
+  geom_point() +
+  theme_bw()
+
+
+
+flights_2018 %>% 
+  filter(Carrier_Name == c("Southwest Airlines Co.", "Delta Airlines Inc.", "American Airlines Inc.", "SkyWest Airlines Inc.", "United Air Lines Inc.",  "Republic Airline", "JetBlue Airways", "Envoy Air", "PSA Airlines Inc.", "Alaska Airlines Inc.")) %>% 
+  mutate(Arr_Delay = as.logical(Arr_Delay, na.rm=TRUE)) %>%
+  mutate(Arr_Delay = as.numeric(Arr_Delay, na.rm=TRUE)) %>%
+  filter(!is.na(Arr_Delay)) %>%
+  ggplot(aes(x = Carrier_Name, y = Distance, color = Arr_Delay)) +
+  geom_point() + 
+  coord_flip() +
+  theme_bw()
+```

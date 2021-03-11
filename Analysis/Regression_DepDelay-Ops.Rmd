@@ -1,0 +1,139 @@
+---
+title: "Regression: Dep_Delay on Total Ops"
+author: "Janice Cessna"
+date: "December 5, 2019"
+output: html_document
+urlcolor: "blue"
+params:
+  solutions: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = params$solutions, 
+                      eval       = params$solutions)
+```
+
+    
+```{r, echo = TRUE}
+library(tidyverse)
+library(broom)
+```
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+    
+
+#Data setup
+
+Establishing data frame with reduced set of initial variables and creation of additional variables for regression models below. 
+```{r}
+flights_2018_DD <- flights_2018 %>%
+  select(Origin,Dep_Time_Planned_Local_Hour, Dep_Delay, 
+         Taxi_Out, Taxi_In, Carrier_Delay, Weather_Delay, Nas_Delay, 
+         Security_Delay, Late_Ac_Delay, Tot_Ops.x) %>%
+  filter(Dep_Delay > 0) %>%  #changed per y variable
+  group_by(Origin) %>% 
+  mutate(Mean_Dep_Delay = mean(Dep_Delay)) %>%
+  mutate(Mean_Taxi_Out = mean(Taxi_Out)) %>%
+  mutate(Mean_Taxi_In = mean(Taxi_In)) %>%
+  mutate(Mean_Carrier_Delay = mean(Carrier_Delay)) %>%
+  mutate(Mean_Weather_Delay = mean(Weather_Delay)) %>%
+  mutate(Mean_Nas_Delay = mean(Nas_Delay)) %>%
+  mutate(Mean_Securit_Delay = mean(Security_Delay)) %>%
+  mutate(Mean_Late_Ac_Delay = mean(Late_Ac_Delay)) %>%
+  mutate(Duplicate_Origin = duplicated(Origin)) %>%
+  filter(Duplicate_Origin == "FALSE")
+```
+
+
+# Regression Model
+
+Plotting mean departure delay versus total operations by airport. 
+```{r}
+flights_2018_DD %>%
+  ggplot(aes(x = Tot_Ops.x, y = Mean_Dep_Delay)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = TRUE) +
+  xlab("Total Airport Operations") +
+  ylab("Mean Departure Delay") +
+  labs(title = "Delay trend by operations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0))
+```
+
+Linear regression of mean departure delay on total operations by airport suggests a slightly decreasing departure delay as total operations increases. 
+```{r}
+lm_Dep_delay <- lm(Mean_Dep_Delay ~ Tot_Ops.x, data = flights_2018_DD)
+lm_Dep_delay_tidy <- tidy(lm_Dep_delay)
+lm_Dep_delay_tidy
+lm_Dep_delay_augment <- augment(lm_Dep_delay)
+lm_Dep_delay_augment
+```
+
+A plot of the regression residuals shows a linear relationship, but variance seems different for different values of x.  
+```{r}
+lm_Dep_delay_augment %>%
+  ggplot(aes(x = .fitted, y = .std.resid)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)
+```
+
+After logging x, the plot of mean departure delay on total operations now looks like:   
+```{r}
+flights_2018_DD %>%
+  ggplot(aes(x = log2(Tot_Ops.x), y = Mean_Dep_Delay)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = TRUE) +
+  xlab("Total Airport Operations") +
+  ylab("Mean Departure Delay") +
+  labs(title = "Delay trend by operations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0))
+```
+
+The revised linear regression model is now: 
+```{r}
+lm_Dep_delay <- lm(Mean_Dep_Delay ~ log2(Tot_Ops.x), data = flights_2018_DD)
+lm_Dep_delay_tidy <- tidy(lm_Dep_delay)
+lm_Dep_delay_tidy
+lm_Dep_delay_augment <- augment(lm_Dep_delay)
+```
+
+And the revised plot of residuals shows variance is more evenly distributed, but still seems to grow as the value of y increases. So we'll apply a log transformation of y next. 
+```{r}
+lm_Dep_delay_augment %>%
+  ggplot(aes(x = .fitted, y = .std.resid)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)
+```
+
+Here, with both x and y logged, the scatterplot looks like: 
+```{r}
+flights_2018_DD %>%
+  ggplot(aes(x = log2(Tot_Ops.x), y = log(Mean_Dep_Delay))) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = TRUE) +
+  xlab("Total Airport Operations") +
+  ylab("Mean Departure Delay") +
+  labs(title = "Delay trend by operations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0))
+```
+
+The revised linear regression model is now: 
+```{r}
+lm_Dep_delay <- lm(log(Mean_Dep_Delay) ~ log2(Tot_Ops.x), data = flights_2018_DD)
+lm_Dep_delay_tidy <- tidy(lm_Dep_delay)
+lm_Dep_delay_tidy
+lm_Dep_delay_augment <- augment(lm_Dep_delay)
+```
+
+The revised plot of residuals may show a marginal improvement, but some outliers could be investigated to evaluate their influence. 
+```{r}
+lm_Dep_delay_augment %>%
+  ggplot(aes(x = .fitted, y = .std.resid)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE)
+```
+
+
+
+
+

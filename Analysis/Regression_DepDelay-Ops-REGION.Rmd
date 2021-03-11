@@ -1,0 +1,108 @@
+---
+title: "Regression: Dep_Delay on Total Ops"
+author: "Janice Cessna"
+date: "December 5, 2019"
+output: html_document
+urlcolor: "blue"
+params:
+  solutions: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = params$solutions, 
+                      eval       = params$solutions)
+```
+
+    
+```{r, echo = TRUE}
+library(tidyverse)
+library(broom)
+```
+```{r}
+flights_2018 <- readRDS("../app/data/flights_2018.rds")
+```
+    
+
+#Data setup
+
+Establishing data frame with reduced set of initial variables and creation of additional variables for regression models below. 
+```{r}
+flights_temp <- flights_2018 %>%
+  select(Origin,Origin_City, Origin_State, Region,
+         Dep_Time_Planned_Local_Hour, Dep_Delay, 
+         Taxi_Out, Taxi_In, Carrier_Delay, Weather_Delay, Nas_Delay, 
+         Security_Delay, Late_Ac_Delay, Tot_Ops.x) %>%
+  filter(Dep_Delay > 0) %>% 
+  group_by(Origin) %>% 
+  mutate(Mean_Dep_Delay = mean(Dep_Delay)) %>%
+  mutate(Mean_Taxi_Out = mean(Taxi_Out)) %>%
+  mutate(Mean_Taxi_In = mean(Taxi_In)) %>%
+  mutate(Mean_Carrier_Delay = mean(Carrier_Delay)) %>%
+  mutate(Mean_Weather_Delay = mean(Weather_Delay)) %>%
+  mutate(Mean_Nas_Delay = mean(Nas_Delay)) %>%
+  mutate(Mean_Security_Delay = mean(Security_Delay)) %>%
+  mutate(Mean_Late_Ac_Delay = mean(Late_Ac_Delay)) %>%
+  mutate(Duplicate_Origin = duplicated(Origin)) %>%
+  filter(Duplicate_Origin == "FALSE")
+```
+
+
+# Regression Model
+
+Plotting mean departure delay versus total operations by airport and grouping by FAA region. 
+```{r}
+flights_temp %>%
+  ggplot(aes(x = Tot_Ops.x, y = Mean_Dep_Delay, group = Region, color = Region)) +
+  geom_point(alpha = 0.5) +
+  xlab("Total Airport Operations") +
+  ylab("Mean Departure Delay") +
+  labs(title = "Delay trend by operations") 
+```
+
+Linear regression model output for mean departure delay on total operations by region: 
+```{r}
+flights_nested <- flights_temp %>%
+  group_by(Region) %>%
+  nest() 
+
+flights_nested <- flights_nested %>%
+  mutate(lmout = map(data, ~lm(Mean_Dep_Delay ~ Tot_Ops.x, data = .))) %>%
+  mutate(tidyout = map(lmout, ~tidy(., conf.int = TRUE)))
+
+flights_lmtidy <- unnest(flights_nested, tidyout) %>%
+  filter(term == "Tot_Ops.x") %>%
+  select(c("Region", "estimate", "p.value", "conf.low", "conf.high"))
+flights_lmtidy
+```
+
+```{r eval=FALSE, include=FALSE}
+#ignore this bit -- just experimenting
+flights_lmtidy %>%
+  filter (term == "Tot_Ops.x") %>%
+  mutate(region_order = fct_reorder(Region, estimate)) %>%
+  ggplot(aes(x = region_order, y = estimate)) +
+  geom_point() +
+  geom_hline(yintercept = c(-0.01,0,0.01), linetype = 2) +
+  geom_segment(aes(x = region_order, xend = region_order, y = conf.low, yend = conf.high), 
+               color = "black", alpha = 0.3) +
+  ylab("Rate of  change") +
+  xlab("Region") +
+  labs(title = "Average estimated departure delay per region with confindence intervals") +
+  theme(axis.text.x = element_blank(),axis.ticks.x = element_blank())
+```
+
+```{r}
+flights_lmtidy %>%
+  ggplot(aes(x = fct_reorder(Region, estimate), y = estimate)) +
+  geom_point(aes(color = cut(p.value, c(-Inf, 0.05, Inf)))) +
+  geom_hline(yintercept = 0, color = "red", linetype = 2) +
+  geom_segment(aes(x = Region, xend = Region, y = conf.low, yend = conf.high), 
+               color = "black", alpha = 0.3) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0)) +
+  theme(legend.position = "none")
+```
+The estimated mean departure delays are not much different than zero and their confidence intervals all include zero. 
+
+
+
+
